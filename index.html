@@ -452,14 +452,22 @@
             const x = ElementSlicer.Utils.random(100, 700);
             const y = 650; // 从屏幕底部下方开始
             
-            // 创建元素精灵
-            const element = this.add.circle(x, y, 
-                ElementSlicer.Config.elements.radius, 
-                typeConfig.color
-            );
+            // 创建元素容器
+            const element = this.add.container(x, y);
+            
+            // 创建圆形图形
+            const circle = this.add.graphics();
+            circle.fillStyle(typeConfig.color, 1);
+            circle.fillCircle(0, 0, ElementSlicer.Config.elements.radius);
+            circle.strokeStyle(0xFFFFFF, 0.3);
+            circle.lineWidth = 2;
+            circle.strokeCircle(0, 0, ElementSlicer.Config.elements.radius);
+            
+            element.add(circle);
             
             // 添加物理属性
             this.physics.add.existing(element);
+            element.body.setCircle(ElementSlicer.Config.elements.radius);
             element.body.setVelocity(
                 ElementSlicer.Utils.random(-50, 50), // 轻微的水平速度
                 ElementSlicer.Config.elements.initialVelocityY
@@ -475,7 +483,7 @@
             element.isSliced = false;
             
             // 添加元素符号文本
-            const symbolText = this.add.text(x, y, symbol, {
+            const symbolText = this.add.text(0, 0, symbol, {
                 fontSize: '28px',
                 fontFamily: 'Arial',
                 color: '#FFFFFF',
@@ -483,17 +491,17 @@
                 strokeThickness: 2
             }).setOrigin(0.5);
             
+            element.add(symbolText);
             element.symbolText = symbolText;
             
             // 为特殊元素添加视觉效果
             if (elementType === 'phantom') {
                 // 幻影元素：半透明效果
                 element.setAlpha(0.7);
-                symbolText.setAlpha(0.7);
                 
                 // 添加闪烁效果
                 this.tweens.add({
-                    targets: [element, symbolText],
+                    targets: element,
                     alpha: 0.3,
                     duration: 1000,
                     yoyo: true,
@@ -517,6 +525,10 @@
             this.elements.add(element);
             
             ElementSlicer.State.elementsSpawned++;
+            
+            // 调试信息
+            console.log(`生成元素: ${elementType} (${symbol}) at (${x}, ${y})`);
+            console.log(`元素总数: ${this.elements.children.entries.length}`);
         }
         
         /**
@@ -1205,11 +1217,7 @@
                 // 旋转元素
                 element.rotation += ElementSlicer.Config.elements.rotationSpeed * delta / 1000;
                 
-                // 更新符号文本位置
-                if (element.symbolText && element.symbolText.active) {
-                    element.symbolText.x = element.x;
-                    element.symbolText.y = element.y;
-                }
+                // 符号文本位置现在由容器自动管理，无需手动更新
                 
                 // 移除超出屏幕的元素
                 if (element.y < -100 || element.y > 700 || 
@@ -1360,6 +1368,19 @@
                 const scene = game.scene.getScene('GameScene');
                 if (scene) {
                     scene.scene.restart();
+                }
+            },
+            
+            // 创建测试元素
+            createTestElement: () => {
+                const scene = game.scene.getScene('GameScene');
+                if (scene) {
+                    // 创建一个简单的红色矩形作为测试
+                    const testElement = scene.add.rectangle(400, 300, 80, 80, 0xFF0000);
+                    scene.physics.add.existing(testElement);
+                    testElement.body.setVelocity(0, -200);
+                    testElement.body.setGravity(0, 300);
+                    console.log('创建了测试元素（红色方块）');
                 }
             }
         };
