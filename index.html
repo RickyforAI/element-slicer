@@ -1200,11 +1200,13 @@
             
             // 更新元素
             this.elements.children.entries.forEach(element => {
+                if (!element || !element.active) return;
+                
                 // 旋转元素
                 element.rotation += ElementSlicer.Config.elements.rotationSpeed * delta / 1000;
                 
                 // 更新符号文本位置
-                if (element.symbolText) {
+                if (element.symbolText && element.symbolText.active) {
                     element.symbolText.x = element.x;
                     element.symbolText.y = element.y;
                 }
@@ -1212,12 +1214,21 @@
                 // 移除超出屏幕的元素
                 if (element.y < -100 || element.y > 700 || 
                     element.x < -100 || element.x > 900) {
-                    if (element.symbolText) {
-                        element.symbolText.destroy();
-                    }
-                    element.destroy();
+                    this.destroyElement(element);
                 }
             });
+            
+            // 限制场景中的元素数量
+            if (this.elements.children.entries.length > 20) {
+                console.warn('Too many elements:', this.elements.children.entries.length);
+                // 移除最老的元素
+                const oldElements = this.elements.children.entries.slice(0, -20);
+                oldElements.forEach(element => {
+                    if (element && element.active) {
+                        this.destroyElement(element);
+                    }
+                });
+            }
             
             // 动态调整难度
             this.updateDifficulty();
@@ -1326,6 +1337,30 @@
                     forceSetTimeOut: true,
                     showFPS: true
                 };
+            },
+            
+            // 清理所有元素
+            clearAllElements: () => {
+                const scene = game.scene.getScene('GameScene');
+                if (scene && scene.elements) {
+                    scene.elements.children.entries.forEach(element => {
+                        if (element) {
+                            if (element.symbolText) {
+                                element.symbolText.destroy();
+                            }
+                            element.destroy();
+                        }
+                    });
+                    console.log('已清理所有元素');
+                }
+            },
+            
+            // 重启游戏
+            restart: () => {
+                const scene = game.scene.getScene('GameScene');
+                if (scene) {
+                    scene.scene.restart();
+                }
             }
         };
         
