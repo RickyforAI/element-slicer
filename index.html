@@ -459,8 +459,7 @@
             const circle = this.add.graphics();
             circle.fillStyle(typeConfig.color, 1);
             circle.fillCircle(0, 0, ElementSlicer.Config.elements.radius);
-            circle.strokeStyle(0xFFFFFF, 0.3);
-            circle.lineWidth = 2;
+            circle.lineStyle(2, 0xFFFFFF, 0.3);
             circle.strokeCircle(0, 0, ElementSlicer.Config.elements.radius);
             
             element.add(circle);
