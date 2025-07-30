@@ -218,6 +218,9 @@
             
             // 生成定时器
             this.spawnTimer = null;
+            
+            // 毒雾遮罩
+            this.toxicFog = null;
         }
         
         /**
@@ -258,26 +261,7 @@
                 ElementSlicer.DevLog.log('ASSETS_LOADED', '资源加载完成');
             });
             
-            // 动态创建圆形纹理
-            this.load.on('start', () => {
-                // 创建不同颜色的圆形纹理
-                const colors = {
-                    'normal': 0x4A90E2,
-                    'toxic': 0x4CAF50,
-                    'phantom': 0x00BCD4,
-                    'explosive': 0xFF4444
-                };
-                
-                for (let type in colors) {
-                    const graphics = this.make.graphics({ x: 0, y: 0 });
-                    graphics.fillStyle(colors[type], 1);
-                    graphics.fillCircle(40, 40, 40);
-                    graphics.generateTexture('element_' + type, 80, 80);
-                    graphics.destroy();
-                }
-            });
-            
-            this.load.start();
+            // 无需预加载纹理，我们会在运行时动态创建
         }
         
         /**
@@ -470,9 +454,22 @@
             const x = ElementSlicer.Utils.random(100, 700);
             const y = 650; // 从屏幕底部下方开始
             
-            // 使用预加载的纹理创建元素
-            const element = this.physics.add.image(x, y, 'element_' + elementType);
+            // 动态创建元素纹理
+            const graphics = this.make.graphics();
+            graphics.fillStyle(typeConfig.color, 1);
+            graphics.fillCircle(40, 40, 40);
+            graphics.lineStyle(3, 0xffffff, 0.8);
+            graphics.strokeCircle(40, 40, 40);
+            
+            // 生成唯一的纹理键
+            const textureKey = `element_${elementType}_${Date.now()}_${Math.random()}`;
+            graphics.generateTexture(textureKey, 80, 80);
+            graphics.destroy();
+            
+            // 使用生成的纹理创建精灵
+            const element = this.physics.add.sprite(x, y, textureKey);
             element.setDisplaySize(80, 80);
+            element.body.setCircle(40); // 设置圆形碰撞体
             element.body.setVelocity(
                 ElementSlicer.Utils.random(-50, 50), // 轻微的水平速度
                 ElementSlicer.Config.elements.initialVelocityY
@@ -817,16 +814,25 @@
                 onComplete: () => fog.destroy()
             });
             
-            // 遮挡玩家视线3秒
-            const fogOverlay = this.add.rectangle(400, 300, 800, 600, 0x4CAF50, 0.2);
-            fogOverlay.setDepth(99);
+            // 使用预创建的毒雾遮罩
+            if (!this.toxicFog) {
+                this.toxicFog = this.add.rectangle(400, 300, 800, 600, 0x4CAF50, 0);
+                this.toxicFog.setDepth(99);
+            }
             
+            // 显示毒雾
+            this.tweens.add({
+                targets: this.toxicFog,
+                alpha: 0.3,
+                duration: 300
+            });
+            
+            // 3秒后消失
             this.time.delayedCall(3000, () => {
                 this.tweens.add({
-                    targets: fogOverlay,
+                    targets: this.toxicFog,
                     alpha: 0,
-                    duration: 500,
-                    onComplete: () => fogOverlay.destroy()
+                    duration: 500
                 });
             });
         }

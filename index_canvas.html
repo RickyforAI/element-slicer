@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>元素切切乐 - Canvas版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        canvas {
+            border: 2px solid #16213e;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(94, 84, 142, 0.5);
+            cursor: crosshair;
+        }
+        
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="info">
+        <div>分数: <span id="score">0</span></div>
+        <div>生命: <span id="lives">❤️❤️❤️</span></div>
+    </div>
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    
+    <script>
+    // 游戏配置
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const livesEl = document.getElementById('lives');
+    
+    // 游戏状态
+    let score = 0;
+    let lives = 3;
+    let elements = [];
+    let sliceTrail = [];
+    let isSlicing = false;
+    let lastSpawnTime = 0;
+    let spawnInterval = 2000;
+    
+    // 元素类型配置
+    const elementTypes = {
+        normal: { color: '#4A90E2', symbols: ['C', 'N', 'O', 'H'], score: 5 },
+        toxic: { color: '#4CAF50', symbols: ['F', 'Cl', 'Br'], score: 8 },
+        phantom: { color: '#00BCD4', symbols: ['He', 'Ne', 'Ar'], score: 15 },
+        explosive: { color: '#FF4444', symbols: ['Li', 'Na', 'K'], score: 0 }
+    };
+    
+    // 元素类
+    class Element {
+        constructor(x, y, type) {
+            this.x = x;
+            this.y = y;
+            this.vx = Math.random() * 100 - 50;
+            this.vy = -400;
+            this.radius = 40;
+            this.type = type;
+            const typeConfig = elementTypes[type];
+            this.color = typeConfig.color;
+            this.symbol = typeConfig.symbols[Math.floor(Math.random() * typeConfig.symbols.length)];
+            this.score = typeConfig.score;
+            this.health = type === 'phantom' ? 3 : 1;
+            this.rotation = 0;
+        }
+        
+        update(deltaTime) {
+            // 更新位置
+            this.x += this.vx * deltaTime;
+            this.y += this.vy * deltaTime;
+            
+            // 重力
+            this.vy += 300 * deltaTime;
+            
+            // 旋转
+            this.rotation += 2 * deltaTime;
+        }
+        
+        draw() {
+            ctx.save();
+            
+            // 绘制圆形
+            ctx.fillStyle = this.color;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // 绘制边框
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // 绘制符号
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.symbol, this.x, this.y);
+            
+            // 绘制黑色描边
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 2;
+            ctx.strokeText(this.symbol, this.x, this.y);
+            
+            ctx.restore();
+        }
+        
+        isOffScreen() {
+            return this.y < -100 || this.y > 700 || this.x < -100 || this.x > 900;
+        }
+        
+        checkCollision(x, y) {
+            const dx = this.x - x;
+            const dy = this.y - y;
+            return Math.sqrt(dx * dx + dy * dy) < this.radius + 10;
+        }
+    }
+    
+    // 生成元素
+    function spawnElement() {
+        const types = ['normal', 'toxic', 'phantom', 'explosive'];
+        const weights = [0.5, 0.2, 0.15, 0.15];
+        
+        let random = Math.random();
+        let typeIndex = 0;
+        let sum = 0;
+        for (let i = 0; i < weights.length; i++) {
+            sum += weights[i];
+            if (random < sum) {
+                typeIndex = i;
+                break;
+            }
+        }
+        
+        const x = Math.random() * 600 + 100;
+        const element = new Element(x, 650, types[typeIndex]);
+        elements.push(element);
+        
+        console.log(`生成元素: ${element.type} (${element.symbol})`);
+    }
+    
+    // 处理切割
+    function handleSlice(element) {
+        switch (element.type) {
+            case 'normal':
+                score += element.score;
+                elements.splice(elements.indexOf(element), 1);
+                break;
+                
+            case 'toxic':
+                score += element.score;
+                elements.splice(elements.indexOf(element), 1);
+                // 添加毒雾效果
+                ctx.fillStyle = 'rgba(76, 175, 80, 0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                setTimeout(() => {
+                    // 3秒后清除效果
+                }, 3000);
+                break;
+                
+            case 'phantom':
+                element.health--;
+                if (element.health <= 0) {
+                    score += element.score;
+                    elements.splice(elements.indexOf(element), 1);
+                } else {
+                    // 加速逃跑
+                    element.vx *= 1.5;
+                    element.vy *= 1.2;
+                }
+                break;
+                
+            case 'explosive':
+                lives--;
+                elements.splice(elements.indexOf(element), 1);
+                updateLives();
+                // 屏幕震动效果
+                canvas.style.animation = 'shake 0.3s';
+                setTimeout(() => {
+                    canvas.style.animation = '';
+                }, 300);
+                break;
+        }
+        
+        updateScore();
+    }
+    
+    // 更新分数
+    function updateScore() {
+        scoreEl.textContent = score;
+        if (score >= 300) {
+            alert('游戏胜利！');
+            location.reload();
+        }
+    }
+    
+    // 更新生命值
+    function updateLives() {
+        let hearts = '';
+        for (let i = 0; i < lives; i++) {
+            hearts += '❤️';
+        }
+        for (let i = lives; i < 3; i++) {
+            hearts += '💔';
+        }
+        livesEl.textContent = hearts;
+        
+        if (lives <= 0) {
+            alert('游戏结束！');
+            location.reload();
+        }
+    }
+    
+    // 鼠标事件
+    canvas.addEventListener('mousedown', (e) => {
+        isSlicing = true;
+        sliceTrail = [];
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isSlicing) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        sliceTrail.push({ x, y });
+        if (sliceTrail.length > 20) {
+            sliceTrail.shift();
+        }
+        
+        // 检测碰撞
+        elements.forEach(element => {
+            if (element.checkCollision(x, y)) {
+                handleSlice(element);
+            }
+        });
+    });
+    
+    canvas.addEventListener('mouseup', () => {
+        isSlicing = false;
+        sliceTrail = [];
+    });
+    
+    // 触摸事件
+    canvas.addEventListener('touchstart', (e) => {
+        isSlicing = true;
+        sliceTrail = [];
+        e.preventDefault();
+    });
+    
+    canvas.addEventListener('touchmove', (e) => {
+        if (!isSlicing) return;
+        
+        const rect = canvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        
+        sliceTrail.push({ x, y });
+        if (sliceTrail.length > 20) {
+            sliceTrail.shift();
+        }
+        
+        // 检测碰撞
+        elements.forEach(element => {
+            if (element.checkCollision(x, y)) {
+                handleSlice(element);
+            }
+        });
+        
+        e.preventDefault();
+    });
+    
+    canvas.addEventListener('touchend', () => {
+        isSlicing = false;
+        sliceTrail = [];
+    });
+    
+    // 游戏循环
+    let lastTime = 0;
+    function gameLoop(currentTime) {
+        const deltaTime = (currentTime - lastTime) / 1000;
+        lastTime = currentTime;
+        
+        // 清空画布
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // 绘制标题
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 36px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('元素切切乐', canvas.width / 2, 50);
+        
+        // 生成元素
+        if (currentTime - lastSpawnTime > spawnInterval) {
+            spawnElement();
+            lastSpawnTime = currentTime;
+            
+            // 逐渐加快生成速度
+            if (spawnInterval > 1000) {
+                spawnInterval -= 10;
+            }
+        }
+        
+        // 更新和绘制元素
+        elements = elements.filter(element => {
+            element.update(deltaTime);
+            
+            if (element.isOffScreen()) {
+                return false;
+            }
+            
+            element.draw();
+            return true;
+        });
+        
+        // 绘制切割轨迹
+        if (sliceTrail.length > 1) {
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            ctx.beginPath();
+            ctx.moveTo(sliceTrail[0].x, sliceTrail[0].y);
+            
+            for (let i = 1; i < sliceTrail.length; i++) {
+                const alpha = i / sliceTrail.length;
+                ctx.globalAlpha = alpha;
+                ctx.lineTo(sliceTrail[i].x, sliceTrail[i].y);
+            }
+            
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            
+            // 外发光效果
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 8;
+            ctx.stroke();
+        }
+        
+        requestAnimationFrame(gameLoop);
+    }
+    
+    // 添加CSS动画
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // 开始游戏
+    requestAnimationFrame(gameLoop);
+    
+    console.log('游戏已启动 - Canvas版本');
+    </script>
+</body>
+</html>

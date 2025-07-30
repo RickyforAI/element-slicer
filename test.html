@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phaser测试</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+</head>
+<body>
+    <script>
+    class TestScene extends Phaser.Scene {
+        create() {
+            // 添加文字
+            this.add.text(100, 100, 'Phaser测试 - 你应该看到:', { color: '#ffffff', fontSize: '24px' });
+            
+            // 1. 红色矩形
+            this.add.rectangle(200, 200, 100, 100, 0xff0000);
+            this.add.text(200, 260, '红色方块', { color: '#ffffff' });
+            
+            // 2. 蓝色圆形
+            this.add.circle(400, 200, 50, 0x0000ff);
+            this.add.text(400, 260, '蓝色圆形', { color: '#ffffff' });
+            
+            // 3. 绿色图形
+            const graphics = this.add.graphics();
+            graphics.fillStyle(0x00ff00, 1);
+            graphics.fillCircle(600, 200, 50);
+            this.add.text(600, 260, '绿色图形', { color: '#ffffff' });
+            
+            console.log('场景创建完成');
+        }
+    }
+    
+    const game = new Phaser.Game({
+        type: Phaser.AUTO,
+        width: 800,
+        height: 400,
+        backgroundColor: '#222222',
+        scene: TestScene
+    });
+    </script>
+</body>
+</html>
