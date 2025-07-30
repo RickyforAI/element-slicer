@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>元素切切乐 - 简化版测试</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <script>
+    class TestScene extends Phaser.Scene {
+        constructor() {
+            super({ key: 'TestScene' });
+        }
+        
+        create() {
+            // 添加背景
+            this.add.rectangle(400, 300, 800, 600, 0x16213e);
+            
+            // 添加标题
+            this.add.text(400, 50, '元素切切乐 - 测试版', {
+                fontSize: '32px',
+                color: '#ffffff'
+            }).setOrigin(0.5);
+            
+            // 创建测试元素
+            this.time.addEvent({
+                delay: 2000,
+                callback: () => {
+                    this.createTestElement();
+                },
+                loop: true
+            });
+            
+            // 立即创建一个
+            this.createTestElement();
+        }
+        
+        createTestElement() {
+            const x = Phaser.Math.Between(100, 700);
+            const colors = [0x4A90E2, 0x4CAF50, 0x00BCD4, 0xFF4444];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            
+            // 使用简单的圆形
+            const circle = this.add.circle(x, 650, 40, color);
+            
+            // 添加文字
+            const text = this.add.text(x, 650, 'H', {
+                fontSize: '24px',
+                color: '#ffffff'
+            }).setOrigin(0.5);
+            
+            // 添加物理
+            this.physics.add.existing(circle);
+            circle.body.setVelocity(
+                Phaser.Math.Between(-50, 50),
+                -400
+            );
+            circle.body.setGravity(0, 300);
+            
+            // 关联文字
+            circle.text = text;
+            
+            console.log('创建元素:', color.toString(16));
+        }
+        
+        update() {
+            // 更新文字位置
+            this.children.list.forEach(child => {
+                if (child.type === 'Circle' && child.text) {
+                    child.text.x = child.x;
+                    child.text.y = child.y;
+                    
+                    // 移除超出屏幕的元素
+                    if (child.y < -50 || child.y > 650) {
+                        child.text.destroy();
+                        child.destroy();
+                    }
+                }
+            });
+        }
+    }
+    
+    const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        backgroundColor: '#1a1a2e',
+        physics: {
+            default: 'arcade',
+            arcade: {
+                gravity: { y: 0 },
+                debug: false
+            }
+        },
+        scene: TestScene
+    };
+    
+    const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

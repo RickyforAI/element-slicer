@@ -258,8 +258,26 @@
                 ElementSlicer.DevLog.log('ASSETS_LOADED', '资源加载完成');
             });
             
-            // 这里可以加载音效、图片等资源
-            // this.load.audio('slice', 'sounds/slice.mp3');
+            // 动态创建圆形纹理
+            this.load.on('start', () => {
+                // 创建不同颜色的圆形纹理
+                const colors = {
+                    'normal': 0x4A90E2,
+                    'toxic': 0x4CAF50,
+                    'phantom': 0x00BCD4,
+                    'explosive': 0xFF4444
+                };
+                
+                for (let type in colors) {
+                    const graphics = this.make.graphics({ x: 0, y: 0 });
+                    graphics.fillStyle(colors[type], 1);
+                    graphics.fillCircle(40, 40, 40);
+                    graphics.generateTexture('element_' + type, 80, 80);
+                    graphics.destroy();
+                }
+            });
+            
+            this.load.start();
         }
         
         /**
@@ -452,21 +470,9 @@
             const x = ElementSlicer.Utils.random(100, 700);
             const y = 650; // 从屏幕底部下方开始
             
-            // 创建元素容器
-            const element = this.add.container(x, y);
-            
-            // 创建圆形图形
-            const circle = this.add.graphics();
-            circle.fillStyle(typeConfig.color, 1);
-            circle.fillCircle(0, 0, ElementSlicer.Config.elements.radius);
-            circle.lineStyle(2, 0xFFFFFF, 0.3);
-            circle.strokeCircle(0, 0, ElementSlicer.Config.elements.radius);
-            
-            element.add(circle);
-            
-            // 添加物理属性
-            this.physics.add.existing(element);
-            element.body.setCircle(ElementSlicer.Config.elements.radius);
+            // 使用预加载的纹理创建元素
+            const element = this.physics.add.image(x, y, 'element_' + elementType);
+            element.setDisplaySize(80, 80);
             element.body.setVelocity(
                 ElementSlicer.Utils.random(-50, 50), // 轻微的水平速度
                 ElementSlicer.Config.elements.initialVelocityY
@@ -480,9 +486,10 @@
             element.damage = typeConfig.damage || 0;
             element.health = typeConfig.health || 1;
             element.isSliced = false;
+            element.fillColor = typeConfig.color;
             
             // 添加元素符号文本
-            const symbolText = this.add.text(0, 0, symbol, {
+            const symbolText = this.add.text(x, y, symbol, {
                 fontSize: '28px',
                 fontFamily: 'Arial',
                 color: '#FFFFFF',
@@ -490,7 +497,6 @@
                 strokeThickness: 2
             }).setOrigin(0.5);
             
-            element.add(symbolText);
             element.symbolText = symbolText;
             
             // 为特殊元素添加视觉效果
@@ -762,6 +768,7 @@
             if (element.symbolText) {
                 element.symbolText.destroy();
             }
+            
             element.destroy();
             
             ElementSlicer.State.elementsSliced++;
@@ -1216,7 +1223,11 @@
                 // 旋转元素
                 element.rotation += ElementSlicer.Config.elements.rotationSpeed * delta / 1000;
                 
-                // 符号文本位置现在由容器自动管理，无需手动更新
+                // 更新文本位置
+                if (element.symbolText) {
+                    element.symbolText.x = element.x;
+                    element.symbolText.y = element.y;
+                }
                 
                 // 移除超出屏幕的元素
                 if (element.y < -100 || element.y > 700 || 
