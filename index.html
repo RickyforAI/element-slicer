@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>元素切切乐 - Element Slicer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #1a1a2e;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 600px;
+            max-width: 100vw;
+            max-height: 100vh;
+        }
+        
+        #game-canvas {
+            border: 2px solid #16213e;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(94, 84, 142, 0.5);
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 24px;
+            text-align: center;
+        }
+        
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin-left: 10px;
+            border: 3px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div class="loading" id="loading">加载中</div>
+    </div>
+    
+    <!-- 引入 Phaser 3.70.0 -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    
+    <script>
+    // ==================== 游戏架构 ====================
+    const ElementSlicer = {
+        // 配置系统 - 所有可调参数集中管理
+        Config: {
+            canvas: {
+                width: 800,
+                height: 600
+            },
+            
+            // 游戏配置
+            game: {
+                targetScore: 300,       // 目标分数
+                initialLives: 3,        // 初始生命值
+                spawnInterval: 2000,    // 初始生成间隔（毫秒）
+                minSpawnInterval: 1000, // 最小生成间隔
+                gravity: 300            // 重力值
+            },
+            
+            // 元素配置
+            elements: {
+                radius: 40,             // 元素半径
+                initialVelocityY: -400, // 初始向上速度
+                rotationSpeed: 2,       // 旋转速度
+                
+                // 元素类型定义
+                types: {
+                    normal: {
+                        symbols: ['C', 'N', 'O', 'H'],
+                        color: 0x4A90E2,    // 蓝色
+                        score: 5,
+                        name: '普通元素'
+                    },
+                    toxic: {
+                        symbols: ['F', 'Cl', 'Br'],
+                        color: 0x4CAF50,    // 绿色
+                        score: 8,
+                        name: '毒雾元素'
+                    },
+                    phantom: {
+                        symbols: ['He', 'Ne', 'Ar'],
+                        color: 0x00BCD4,    // 青色
+                        score: 15,
+                        health: 3,          // 需要切3次
+                        name: '幻影元素'
+                    },
+                    explosive: {
+                        symbols: ['Li', 'Na', 'K'],
+                        color: 0xFF4444,    // 红色
+                        score: 0,
+                        damage: 1,          // 扣除生命值
+                        name: '爆裂元素'
+                    }
+                }
+            },
+            
+            // UI配置
+            ui: {
+                fontSize: 24,
+                fontFamily: 'Arial',
+                colors: {
+                    text: '#FFFFFF',
+                    score: '#FFD700',
+                    lives: '#FF6B6B'
+                }
+            },
+            
+            // 版本信息
+            version: '0.1.0'
+        },
+        
+        // 游戏状态 - 全局状态管理
+        State: {
+            gameState: 'loading',   // loading, menu, playing, paused, gameover
+            score: 0,
+            lives: 3,
+            combo: 0,
+            maxCombo: 0,
+            level: 1,
+            elementsSpawned: 0,
+            elementsSliced: 0,
+            currentSpawnInterval: 2000
+        },
+        
+        // 核心系统
+        Systems: {},
+        
+        // 工具函数
+        Utils: {
+            /**
+             * 生成指定范围的随机数
+             */
+            random: function(min, max) {
+                return Math.random() * (max - min) + min;
+            },
+            
+            /**
+             * 计算两点之间的距离
+             */
+            distance: function(x1, y1, x2, y2) {
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                return Math.sqrt(dx * dx + dy * dy);
+            },
+            
+            /**
+             * 线性插值
+             */
+            lerp: function(a, b, t) {
+                return a + (b - a) * t;
+            }
+        },
+        
+        // 开发日志
+        DevLog: {
+            entries: [],
+            
+            log: function(action, details) {
+                this.entries.push({
+                    timestamp: new Date().toISOString(),
+                    action: action,
+                    details: details,
+                    version: ElementSlicer.Config.version
+                });
+                console.log(`[DevLog] ${action}:`, details);
+            }
+        }
+    };
+    
+    // ==================== Phaser 场景定义 ====================
+    class GameScene extends Phaser.Scene {
+        constructor() {
+            super({ key: 'GameScene' });
+            
+            // 场景变量
+            this.elements = null;       // 元素组
+            this.sliceGraphics = null;  // 切割轨迹
+            this.scoreText = null;      // 分数文本
+            this.livesText = null;      // 生命值文本
+            this.comboText = null;      // 连击文本
+            this.background = null;     // 背景
+            
+            // 切割相关
+            this.isSlicing = false;
+            this.slicePoints = [];
+            
+            // 生成定时器
+            this.spawnTimer = null;
+        }
+        
+        /**
+         * 预加载资源
+         */
+        preload() {
+            // 创建加载进度条
+            const progressBar = this.add.graphics();
+            const progressBox = this.add.graphics();
+            progressBox.fillStyle(0x222222, 0.8);
+            progressBox.fillRect(240, 270, 320, 50);
+            
+            const width = this.cameras.main.width;
+            const height = this.cameras.main.height;
+            const loadingText = this.make.text({
+                x: width / 2,
+                y: height / 2 - 50,
+                text: '加载中...',
+                style: {
+                    font: '20px Arial',
+                    fill: '#ffffff'
+                }
+            });
+            loadingText.setOrigin(0.5, 0.5);
+            
+            // 监听加载进度
+            this.load.on('progress', function (value) {
+                progressBar.clear();
+                progressBar.fillStyle(0xffffff, 1);
+                progressBar.fillRect(250, 280, 300 * value, 30);
+            });
+            
+            // 加载完成
+            this.load.on('complete', function () {
+                progressBar.destroy();
+                progressBox.destroy();
+                loadingText.destroy();
+                ElementSlicer.DevLog.log('ASSETS_LOADED', '资源加载完成');
+            });
+            
+            // 这里可以加载音效、图片等资源
+            // this.load.audio('slice', 'sounds/slice.mp3');
+        }
+        
+        /**
+         * 创建游戏场景
+         */
+        create() {
+            ElementSlicer.DevLog.log('SCENE_CREATED', '游戏场景创建');
+            
+            // 隐藏加载提示
+            document.getElementById('loading').style.display = 'none';
+            
+            // 创建紫色渐变背景
+            this.createBackground();
+            
+            // 创建UI
+            this.createUI();
+            
+            // 创建元素组
+            this.elements = this.physics.add.group();
+            
+            // 创建切割轨迹图形
+            this.sliceGraphics = this.add.graphics();
+            
+            // 设置输入事件
+            this.setupInput();
+            
+            // 开始游戏
+            this.startGame();
+        }
+        
+        /**
+         * 创建背景
+         */
+        createBackground() {
+            // 创建渐变背景
+            const graphics = this.add.graphics();
+            
+            // 深紫到浅紫的渐变
+            const color1 = 0x1a1a2e;  // 深紫
+            const color2 = 0x16213e;  // 中紫
+            const color3 = 0x0f3460;  // 浅紫
+            
+            // 绘制渐变矩形
+            for (let i = 0; i < 100; i++) {
+                const color = Phaser.Display.Color.Interpolate.ColorWithColor(
+                    Phaser.Display.Color.ValueToColor(color1),
+                    Phaser.Display.Color.ValueToColor(color3),
+                    100,
+                    i
+                );
+                graphics.fillStyle(color.color, 1);
+                graphics.fillRect(0, i * 6, 800, 6);
+            }
+            
+            this.background = graphics;
+        }
+        
+        /**
+         * 创建UI界面
+         */
+        createUI() {
+            const config = ElementSlicer.Config;
+            
+            // 游戏标题
+            this.add.text(config.canvas.width / 2, 30, '元素切切乐', {
+                fontSize: '36px',
+                fontFamily: config.ui.fontFamily,
+                color: config.ui.colors.text,
+                stroke: '#000000',
+                strokeThickness: 4
+            }).setOrigin(0.5);
+            
+            // 分数显示
+            this.scoreText = this.add.text(20, 20, '分数: 0', {
+                fontSize: config.ui.fontSize + 'px',
+                fontFamily: config.ui.fontFamily,
+                color: config.ui.colors.score
+            });
+            
+            // 生命值显示
+            this.livesText = this.add.text(20, 60, '生命: ❤️❤️❤️', {
+                fontSize: config.ui.fontSize + 'px',
+                fontFamily: config.ui.fontFamily,
+                color: config.ui.colors.lives
+            });
+            
+            // 连击显示（初始隐藏）
+            this.comboText = this.add.text(config.canvas.width / 2, 100, '', {
+                fontSize: '32px',
+                fontFamily: config.ui.fontFamily,
+                color: '#FFD700',
+                stroke: '#000000',
+                strokeThickness: 4
+            }).setOrigin(0.5).setAlpha(0);
+            
+            // 目标分数提示
+            this.add.text(config.canvas.width - 20, 20, 
+                `目标: ${config.game.targetScore}分`, {
+                fontSize: '20px',
+                fontFamily: config.ui.fontFamily,
+                color: '#FFFFFF',
+                align: 'right'
+            }).setOrigin(1, 0);
+        }
+        
+        /**
+         * 设置输入事件
+         */
+        setupInput() {
+            // 鼠标/触摸开始
+            this.input.on('pointerdown', (pointer) => {
+                this.startSlice(pointer);
+            });
+            
+            // 鼠标/触摸移动
+            this.input.on('pointermove', (pointer) => {
+                if (this.isSlicing) {
+                    this.updateSlice(pointer);
+                }
+            });
+            
+            // 鼠标/触摸结束
+            this.input.on('pointerup', () => {
+                this.endSlice();
+            });
+            
+            // 键盘事件（调试用）
+            this.input.keyboard.on('keydown-P', () => {
+                this.togglePause();
+            });
+        }
+        
+        /**
+         * 开始游戏
+         */
+        startGame() {
+            ElementSlicer.State.gameState = 'playing';
+            ElementSlicer.State.score = 0;
+            ElementSlicer.State.lives = ElementSlicer.Config.game.initialLives;
+            ElementSlicer.State.combo = 0;
+            
+            // 开始生成元素
+            this.startElementSpawning();
+            
+            ElementSlicer.DevLog.log('GAME_STARTED', '游戏开始');
+        }
+        
+        /**
+         * 开始生成元素
+         */
+        startElementSpawning() {
+            // 立即生成第一个元素
+            this.spawnElement();
+            
+            // 设置定时生成
+            this.spawnTimer = this.time.addEvent({
+                delay: ElementSlicer.State.currentSpawnInterval,
+                callback: this.spawnElement,
+                callbackScope: this,
+                loop: true
+            });
+        }
+        
+        /**
+         * 生成元素
+         */
+        spawnElement() {
+            // 暂时只生成普通元素进行测试
+            const x = ElementSlicer.Utils.random(100, 700);
+            const y = 650; // 从屏幕底部下方开始
+            
+            // 创建元素精灵
+            const element = this.add.circle(x, y, 
+                ElementSlicer.Config.elements.radius, 
+                ElementSlicer.Config.elements.types.normal.color
+            );
+            
+            // 添加物理属性
+            this.physics.add.existing(element);
+            element.body.setVelocity(
+                ElementSlicer.Utils.random(-50, 50), // 轻微的水平速度
+                ElementSlicer.Config.elements.initialVelocityY
+            );
+            element.body.setGravity(0, ElementSlicer.Config.game.gravity);
+            
+            // 添加元素属性
+            element.elementType = 'normal';
+            element.symbol = 'C'; // 暂时固定为碳
+            element.score = ElementSlicer.Config.elements.types.normal.score;
+            
+            // 添加元素符号文本
+            const symbolText = this.add.text(x, y, element.symbol, {
+                fontSize: '28px',
+                fontFamily: 'Arial',
+                color: '#FFFFFF',
+                stroke: '#000000',
+                strokeThickness: 2
+            }).setOrigin(0.5);
+            
+            element.symbolText = symbolText;
+            
+            // 添加到元素组
+            this.elements.add(element);
+            
+            ElementSlicer.State.elementsSpawned++;
+        }
+        
+        /**
+         * 开始切割
+         */
+        startSlice(pointer) {
+            this.isSlicing = true;
+            this.slicePoints = [{ x: pointer.x, y: pointer.y }];
+        }
+        
+        /**
+         * 更新切割轨迹
+         */
+        updateSlice(pointer) {
+            if (!this.isSlicing) return;
+            
+            // 添加新点
+            this.slicePoints.push({ x: pointer.x, y: pointer.y });
+            
+            // 限制点数量
+            if (this.slicePoints.length > 20) {
+                this.slicePoints.shift();
+            }
+            
+            // 绘制轨迹
+            this.drawSliceTrail();
+            
+            // 检测碰撞
+            this.checkSliceCollision(pointer);
+        }
+        
+        /**
+         * 结束切割
+         */
+        endSlice() {
+            this.isSlicing = false;
+            this.slicePoints = [];
+            this.sliceGraphics.clear();
+        }
+        
+        /**
+         * 绘制切割轨迹
+         */
+        drawSliceTrail() {
+            this.sliceGraphics.clear();
+            
+            if (this.slicePoints.length < 2) return;
+            
+            // 设置线条样式
+            this.sliceGraphics.lineStyle(4, 0xFFFFFF, 1);
+            
+            // 绘制轨迹
+            this.sliceGraphics.beginPath();
+            this.sliceGraphics.moveTo(this.slicePoints[0].x, this.slicePoints[0].y);
+            
+            for (let i = 1; i < this.slicePoints.length; i++) {
+                const alpha = i / this.slicePoints.length;
+                this.sliceGraphics.lineStyle(4, 0xFFFFFF, alpha);
+                this.sliceGraphics.lineTo(this.slicePoints[i].x, this.slicePoints[i].y);
+            }
+            
+            this.sliceGraphics.strokePath();
+            
+            // 添加发光效果
+            this.sliceGraphics.lineStyle(8, 0xFFFFFF, 0.3);
+            this.sliceGraphics.strokePath();
+        }
+        
+        /**
+         * 检测切割碰撞
+         */
+        checkSliceCollision(pointer) {
+            this.elements.children.entries.forEach(element => {
+                if (!element.active) return;
+                
+                const distance = ElementSlicer.Utils.distance(
+                    pointer.x, pointer.y,
+                    element.x, element.y
+                );
+                
+                if (distance < ElementSlicer.Config.elements.radius + 10) {
+                    this.sliceElement(element);
+                }
+            });
+        }
+        
+        /**
+         * 切割元素
+         */
+        sliceElement(element) {
+            // 更新分数
+            ElementSlicer.State.score += element.score;
+            this.updateScore();
+            
+            // 显示得分动画
+            this.showScorePopup(element.x, element.y, element.score);
+            
+            // 移除元素
+            if (element.symbolText) {
+                element.symbolText.destroy();
+            }
+            element.destroy();
+            
+            ElementSlicer.State.elementsSliced++;
+            
+            // 更新连击
+            this.updateCombo();
+        }
+        
+        /**
+         * 更新分数显示
+         */
+        updateScore() {
+            this.scoreText.setText(`分数: ${ElementSlicer.State.score}`);
+            
+            // 检查是否达到目标
+            if (ElementSlicer.State.score >= ElementSlicer.Config.game.targetScore) {
+                this.gameWin();
+            }
+        }
+        
+        /**
+         * 显示得分弹出动画
+         */
+        showScorePopup(x, y, score) {
+            const popup = this.add.text(x, y, `+${score}`, {
+                fontSize: '28px',
+                fontFamily: 'Arial',
+                color: '#FFD700',
+                stroke: '#000000',
+                strokeThickness: 3
+            }).setOrigin(0.5);
+            
+            // 向上飘动并淡出
+            this.tweens.add({
+                targets: popup,
+                y: y - 50,
+                alpha: 0,
+                duration: 1000,
+                ease: 'Power2',
+                onComplete: () => {
+                    popup.destroy();
+                }
+            });
+        }
+        
+        /**
+         * 更新连击
+         */
+        updateCombo() {
+            ElementSlicer.State.combo++;
+            
+            if (ElementSlicer.State.combo > ElementSlicer.State.maxCombo) {
+                ElementSlicer.State.maxCombo = ElementSlicer.State.combo;
+            }
+            
+            // 显示连击
+            if (ElementSlicer.State.combo >= 3) {
+                this.showCombo();
+            }
+            
+            // 重置连击计时器
+            if (this.comboTimer) {
+                this.comboTimer.remove();
+            }
+            
+            this.comboTimer = this.time.delayedCall(2000, () => {
+                ElementSlicer.State.combo = 0;
+                this.hideCombo();
+            });
+        }
+        
+        /**
+         * 显示连击
+         */
+        showCombo() {
+            this.comboText.setText(`${ElementSlicer.State.combo} 连击!`);
+            this.comboText.setAlpha(1);
+            
+            // 缩放动画
+            this.tweens.add({
+                targets: this.comboText,
+                scaleX: 1.2,
+                scaleY: 1.2,
+                duration: 200,
+                yoyo: true,
+                ease: 'Power2'
+            });
+        }
+        
+        /**
+         * 隐藏连击
+         */
+        hideCombo() {
+            this.tweens.add({
+                targets: this.comboText,
+                alpha: 0,
+                duration: 300
+            });
+        }
+        
+        /**
+         * 切换暂停
+         */
+        togglePause() {
+            if (ElementSlicer.State.gameState === 'playing') {
+                ElementSlicer.State.gameState = 'paused';
+                this.physics.pause();
+                this.spawnTimer.paused = true;
+                
+                // 显示暂停提示
+                this.pauseText = this.add.text(400, 300, '游戏暂停', {
+                    fontSize: '48px',
+                    fontFamily: 'Arial',
+                    color: '#FFFFFF',
+                    stroke: '#000000',
+                    strokeThickness: 6
+                }).setOrigin(0.5);
+                
+            } else if (ElementSlicer.State.gameState === 'paused') {
+                ElementSlicer.State.gameState = 'playing';
+                this.physics.resume();
+                this.spawnTimer.paused = false;
+                
+                if (this.pauseText) {
+                    this.pauseText.destroy();
+                }
+            }
+        }
+        
+        /**
+         * 游戏胜利
+         */
+        gameWin() {
+            ElementSlicer.State.gameState = 'gameover';
+            this.physics.pause();
+            if (this.spawnTimer) this.spawnTimer.remove();
+            
+            this.add.text(400, 300, '游戏胜利!', {
+                fontSize: '64px',
+                fontFamily: 'Arial',
+                color: '#FFD700',
+                stroke: '#000000',
+                strokeThickness: 6
+            }).setOrigin(0.5);
+            
+            ElementSlicer.DevLog.log('GAME_WON', {
+                score: ElementSlicer.State.score,
+                maxCombo: ElementSlicer.State.maxCombo
+            });
+        }
+        
+        /**
+         * 更新循环
+         */
+        update(time, delta) {
+            if (ElementSlicer.State.gameState !== 'playing') return;
+            
+            // 更新元素
+            this.elements.children.entries.forEach(element => {
+                // 旋转元素
+                element.rotation += ElementSlicer.Config.elements.rotationSpeed * delta / 1000;
+                
+                // 更新符号文本位置
+                if (element.symbolText) {
+                    element.symbolText.x = element.x;
+                    element.symbolText.y = element.y;
+                }
+                
+                // 移除超出屏幕的元素
+                if (element.y < -100 || element.y > 700 || 
+                    element.x < -100 || element.x > 900) {
+                    if (element.symbolText) {
+                        element.symbolText.destroy();
+                    }
+                    element.destroy();
+                }
+            });
+            
+            // 动态调整难度
+            this.updateDifficulty();
+        }
+        
+        /**
+         * 更新难度
+         */
+        updateDifficulty() {
+            // 每30秒增加难度
+            const elapsedTime = this.time.now / 1000; // 转换为秒
+            const difficultyLevel = Math.floor(elapsedTime / 30);
+            
+            if (difficultyLevel > ElementSlicer.State.level - 1) {
+                ElementSlicer.State.level = difficultyLevel + 1;
+                
+                // 减少生成间隔
+                const newInterval = Math.max(
+                    ElementSlicer.Config.game.minSpawnInterval,
+                    ElementSlicer.Config.game.spawnInterval - (difficultyLevel * 200)
+                );
+                
+                if (newInterval !== ElementSlicer.State.currentSpawnInterval) {
+                    ElementSlicer.State.currentSpawnInterval = newInterval;
+                    
+                    // 重新设置生成定时器
+                    if (this.spawnTimer) {
+                        this.spawnTimer.remove();
+                    }
+                    
+                    this.spawnTimer = this.time.addEvent({
+                        delay: newInterval,
+                        callback: this.spawnElement,
+                        callbackScope: this,
+                        loop: true
+                    });
+                    
+                    ElementSlicer.DevLog.log('DIFFICULTY_INCREASED', {
+                        level: ElementSlicer.State.level,
+                        spawnInterval: newInterval
+                    });
+                }
+            }
+        }
+    }
+    
+    // ==================== 游戏初始化 ====================
+    window.addEventListener('load', () => {
+        // Phaser 游戏配置
+        const config = {
+            type: Phaser.AUTO,
+            width: ElementSlicer.Config.canvas.width,
+            height: ElementSlicer.Config.canvas.height,
+            parent: 'game-container',
+            backgroundColor: '#1a1a2e',
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH
+            },
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: GameScene,
+            
+            // 移动端优化
+            input: {
+                activePointers: 3  // 支持多点触控
+            }
+        };
+        
+        // 创建游戏实例
+        const game = new Phaser.Game(config);
+        
+        // 保存游戏实例引用
+        ElementSlicer.gameInstance = game;
+        
+        // 调试命令
+        window.ElementSlicer = ElementSlicer;
+        
+        // 添加调试功能
+        ElementSlicer.debug = {
+            // 显示当前状态
+            showState: () => console.table(ElementSlicer.State),
+            
+            // 设置分数
+            setScore: (score) => {
+                ElementSlicer.State.score = score;
+                const scene = game.scene.getScene('GameScene');
+                if (scene) scene.updateScore();
+            },
+            
+            // 添加生命
+            addLife: () => {
+                ElementSlicer.State.lives++;
+                console.log('生命值:', ElementSlicer.State.lives);
+            },
+            
+            // 显示FPS
+            showFPS: () => {
+                game.config.fps = {
+                    target: 60,
+                    forceSetTimeOut: true,
+                    showFPS: true
+                };
+            }
+        };
+        
+        ElementSlicer.DevLog.log('GAME_INITIALIZED', '游戏初始化完成');
+    });
+    </script>
+</body>
+</html>
